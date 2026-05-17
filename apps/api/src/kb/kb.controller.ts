@@ -10,6 +10,7 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiQuery, ApiParam } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { KbService } from './kb.service'
 import { ApiKeyGuard } from '../auth/api-key.guard'
@@ -21,16 +22,56 @@ import { validate } from 'class-validator'
 
 @Controller('kb')
 @UseGuards(ApiKeyGuard)
+@ApiTags('kb')
+@ApiHeader({
+  name: 'x-api-key',
+  description: 'API key for authentication',
+  required: true,
+})
 export class KbController {
   constructor(private kbService: KbService) {}
 
   @Post('push')
+  @ApiOperation({
+    summary: 'Push solution to knowledge base',
+    description: 'Creates a new solution and indexes it for search',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Solution pushed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        message: { type: 'string', example: 'Pushed successfully' },
+        related_found: { type: 'number', description: 'Number of related solutions' },
+      },
+    },
+  })
   push(@Body() dto: PushKbDto) {
     return this.kbService.push(dto)
   }
 
   @Throttle({ short: { limit: 2, ttl: 1000 } })
   @Get('search')
+  @ApiOperation({
+    summary: 'Search knowledge base',
+    description: 'Full-text search with caching (2 req/sec limit)',
+  })
+  @ApiQuery({ name: 'q', type: 'string', description: 'Search query (required)' })
+  @ApiQuery({ name: 'limit', type: 'number', required: false, example: 5, minimum: 1, maximum: 100 })
+  @ApiResponse({
+    status: 200,
+    description: 'Search results',
+    schema: {
+      type: 'object',
+      properties: {
+        results: { type: 'array' },
+        total: { type: 'number' },
+        cached: { type: 'boolean' },
+      },
+    },
+  })
   async search(@Query('q') q: string, @Query('limit') limit?: string) {
     // Validate query parameter
     if (!q || typeof q !== 'string' || q.trim().length === 0) {
@@ -46,6 +87,15 @@ export class KbController {
   }
 
   @Get('list')
+  @ApiOperation({
+    summary: 'List solutions with pagination',
+    description: 'Retrieve solutions with optional filtering by tag or project',
+  })
+  @ApiQuery({ name: 'tag', type: 'string', required: false })
+  @ApiQuery({ name: 'project', type: 'string', required: false })
+  @ApiQuery({ name: 'page', type: 'number', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', type: 'number', required: false, example: 20 })
+  @ApiResponse({ status: 200, description: 'Paginated solution list' })
   list(
     @Query('tag') tag?: string,
     @Query('project') project?: string,
@@ -61,16 +111,35 @@ export class KbController {
   }
 
   @Get(':id')
+  @ApiOperation({
+    summary: 'Get solution by ID',
+    description: 'Retrieve a single solution with all details and relationships',
+  })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Solution details' })
+  @ApiResponse({ status: 404, description: 'Solution not found' })
   getById(@Param('id') id: string) {
     return this.kbService.getById(id)
   }
 
   @Patch(':id')
+  @ApiOperation({
+    summary: 'Update solution',
+    description: 'Modify solution content or metadata',
+  })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Solution updated successfully' })
   update(@Param('id') id: string, @Body() dto: UpdateKbDto) {
     return this.kbService.update(id, dto)
   }
 
   @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete solution',
+    description: 'Remove a solution from the knowledge base',
+  })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Solution deleted successfully' })
   delete(@Param('id') id: string) {
     return this.kbService.delete(id)
   }

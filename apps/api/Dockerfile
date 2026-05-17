@@ -2,7 +2,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 RUN npm i -g @nestjs/cli
 COPY package.json ./
-RUN npm install --no-audit --no-fund
+RUN npm install --no-audit --no-fund --legacy-peer-deps
 COPY . .
 RUN npm run build
 
