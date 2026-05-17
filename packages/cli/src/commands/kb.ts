@@ -51,21 +51,63 @@ export function registerKbCommands(program: Command) {
     .option('-t, --tags <tags>', 'comma-separated tags')
     .option('--ticket <ref>', 'ticket reference')
     .option('--project <name>', 'project name')
-    .action(async (file: string, opts: { tags?: string; ticket?: string; project?: string }) => {
-      const spinner = ora('Pushing solution...').start()
+    .option('--skip-suggestions', 'skip tag suggestions')
+    .action(async (file: string, opts: { tags?: string; ticket?: string; project?: string; skipSuggestions?: boolean }) => {
+      const spinner = ora('Reading solution...').start()
       try {
         const content = readFileSync(file, 'utf-8')
         const title = extractTitle(content)
         const config = getConfig()
+        let finalTags = opts.tags ? opts.tags.split(',').map((t) => t.trim()) : []
+
+        // Fetch tag suggestions if tags not explicitly provided
+        if (finalTags.length === 0 && !opts.skipSuggestions) {
+          spinner.text = 'Analyzing content for tag suggestions...'
+          try {
+            const suggestions = await api.post<any>('/kb/suggest-tags', {
+              content,
+              project: opts.project ?? (config.default_project || undefined),
+            })
+
+            if (suggestions.suggestedTags?.length > 0) {
+              spinner.stop()
+              console.log(chalk.cyan('\n📌 Suggested tags (auto-applied):\n'))
+
+              // Display suggestions with confidence bars
+              const topSuggestions = suggestions.suggestedTags.slice(0, 5)
+              for (const tag of topSuggestions) {
+                const barLength = Math.round(tag.confidence * 20)
+                const bar = '█'.repeat(barLength) + '░'.repeat(20 - barLength)
+                console.log(`  ${tag.tag.padEnd(20)} ${bar} ${(tag.confidence * 100).toFixed(0)}%`)
+              }
+
+              // Auto-apply top 5 suggestions
+              finalTags = topSuggestions.map((t) => t.tag)
+              console.log(chalk.dim('\nTo override: use --tags "tag1,tag2" or --skip-suggestions\n'))
+              spinner.start('Pushing solution...')
+            } else {
+              spinner.text = 'No tags suggested, proceeding...'
+            }
+          } catch (err: any) {
+            spinner.warn('Could not fetch suggestions, continuing without...')
+            spinner.start('Pushing solution...')
+          }
+        } else if (finalTags.length > 0) {
+          spinner.text = 'Pushing solution...'
+        }
+
+        // Execute the push
         const data = await api.post<any>('/kb/push', {
           title,
           content,
-          tags: opts.tags ? opts.tags.split(',').map((t) => t.trim()) : [],
+          tags: finalTags,
           ticket_ref: opts.ticket,
           project: opts.project ?? (config.default_project || undefined),
         })
+
         spinner.succeed(chalk.green(`Pushed: ${title}`))
         console.log(chalk.dim(`  ID: ${data.id}`))
+        console.log(chalk.dim(`  Tags: ${finalTags.length ? finalTags.join(', ') : '(none)'}`))
         console.log(chalk.dim(`  Related found: ${data.related_found}`))
       } catch (err: any) {
         spinner.fail(err.message)

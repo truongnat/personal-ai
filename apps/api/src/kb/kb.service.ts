@@ -7,6 +7,7 @@ import { CacheService } from '../cache/cache.service'
 import { SearchService } from '../search/search.service'
 import { PushKbDto } from './dto/push-kb.dto'
 import { UpdateKbDto } from './dto/update-kb.dto'
+import { SuggestedTagDto } from './dto/suggest-tags.dto'
 
 @Injectable()
 export class KbService {
@@ -256,5 +257,118 @@ export class KbService {
     await this.searchSvc.deleteDocument('solutions', id)
     await this.cache.delByPattern('search:*')
     return { message: 'Deleted successfully' }
+  }
+
+  async suggestTags(content: string, project?: string): Promise<SuggestedTagDto[]> {
+    // 1. Extract keywords from content (heuristic)
+    const keywords = this.extractKeywords(content)
+    if (keywords.length === 0) return []
+
+    // 2. Query Meilisearch for similar solutions
+    const { hits } = await this.searchSvc.search('solutions', keywords.join(' '), { limit: 10 })
+
+    // 3. Aggregate tags from similar solutions (frequency-based)
+    const tagFrequency = new Map<string, number>()
+    for (const hit of hits) {
+      const tags = (hit.tags as string[]) ?? []
+      for (const tag of tags) {
+        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1)
+      }
+    }
+
+    // 4. Query graph for related tags (co-occurrence patterns)
+    const graphTags = await this.getRelatedTagsByGraph(keywords)
+
+    // 5. Merge and rank by confidence
+    const suggested = this.rankTagSuggestions(tagFrequency, graphTags, keywords, project)
+
+    // 6. Return top 10 with confidence scores
+    return suggested.slice(0, 10)
+  }
+
+  private extractKeywords(content: string): string[] {
+    // Remove common words, extract meaningful terms
+    const stopwords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'be', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as', 'that', 'this', 'it', 'have', 'has', 'do', 'does', 'did', 'can', 'could', 'would', 'should'])
+    const words = content.toLowerCase().match(/\b\w+\b/g) || []
+
+    return words
+      .filter((w) => w.length > 3 && !stopwords.has(w))
+      .slice(0, 10)
+  }
+
+  private async getRelatedTagsByGraph(keywords: string[]): Promise<Map<string, number>> {
+    const tagMap = new Map<string, number>()
+
+    // For each keyword, find tags that co-occur frequently in the graph
+    for (const keyword of keywords) {
+      const result = await this.neo4j.runQuery(
+        `
+        MATCH (t:Tag { name: $keyword })<-[:TAGGED_WITH]-(s:Solution)
+              -[:TAGGED_WITH]->(related:Tag)
+        WHERE related.name <> $keyword
+        RETURN related.name AS name, count(DISTINCT s) AS cnt
+        ORDER BY cnt DESC
+        LIMIT 5
+        `,
+        { keyword },
+      )
+
+      for (const record of result.records) {
+        const name = record.get('name')
+        const cnt = record.get('cnt').toNumber()
+        tagMap.set(name, (tagMap.get(name) || 0) + cnt)
+      }
+    }
+
+    return tagMap
+  }
+
+  private rankTagSuggestions(
+    frequency: Map<string, number>,
+    graphTags: Map<string, number>,
+    keywords: string[],
+    project?: string,
+  ): SuggestedTagDto[] {
+    const scored = new Map<string, SuggestedTagDto>()
+
+    // Score from frequency (0-1, weighted by occurrences)
+    frequency.forEach((count, tag) => {
+      const confidence = Math.min(count / 5, 1.0) * 0.6 // Weight frequency at 60%
+      scored.set(tag, {
+        tag,
+        confidence,
+        reason: 'frequency',
+        relatedSolutions: count,
+      })
+    })
+
+    // Score from graph patterns (co-occurrence)
+    graphTags.forEach((count, tag) => {
+      if (scored.has(tag)) {
+        const existing = scored.get(tag)!
+        existing.confidence = Math.max(existing.confidence, (Math.min(count / 10, 1.0) * 0.4))
+      } else {
+        scored.set(tag, {
+          tag,
+          confidence: Math.min(count / 10, 1.0) * 0.4, // Weight graph at 40%
+          reason: 'graph',
+          relatedSolutions: 0,
+        })
+      }
+    })
+
+    // Boost keyword matches (direct content match)
+    keywords.forEach((keyword) => {
+      if (scored.has(keyword)) {
+        const existing = scored.get(keyword)!
+        existing.confidence = Math.min(existing.confidence + 0.3, 1.0)
+        existing.reason = 'content_match'
+      }
+    })
+
+    // Filter low-confidence, sort by confidence (descending)
+    return Array.from(scored.values())
+      .filter((t) => t.confidence > 0.2)
+      .sort((a, b) => b.confidence - a.confidence)
   }
 }

@@ -17,6 +17,7 @@ import { ApiKeyGuard } from '../auth/api-key.guard'
 import { PushKbDto } from './dto/push-kb.dto'
 import { UpdateKbDto } from './dto/update-kb.dto'
 import { SearchKbDto } from './dto/search-kb.dto'
+import { SuggestTagsDto, SuggestTagsResponseDto } from './dto/suggest-tags.dto'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
 
@@ -84,6 +85,31 @@ export class KbController {
     }
 
     return this.kbService.search(q, limitNum)
+  }
+
+  @Post('suggest-tags')
+  @ApiOperation({
+    summary: 'Suggest tags for solution content',
+    description: 'Analyzes solution content and suggests relevant tags based on KB graph patterns and search similarity',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Suggested tags with confidence scores',
+    type: SuggestTagsResponseDto,
+  })
+  async suggestTags(@Body() dto: SuggestTagsDto): Promise<SuggestTagsResponseDto> {
+    const suggestedTags = await this.kbService.suggestTags(dto.content, dto.project)
+
+    // Generate brief topic summary from top tags
+    const topicSummary = suggestedTags
+      .slice(0, 3)
+      .map((t) => t.tag)
+      .join(', ')
+
+    return {
+      suggestedTags,
+      topicSummary,
+    }
   }
 
   @Get('list')
