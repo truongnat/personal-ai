@@ -108,28 +108,42 @@ export class KbService {
     const { hits, totalHits } = await this.searchSvc.search('solutions', query, { limit })
 
     const results: any[] = []
-    for (const hit of hits) {
+    if (hits.length > 0) {
+      // Batch fetch all solutions in a single Neo4j query (eliminates N+1)
+      const ids = hits.map((h) => h.id)
       const res = await this.neo4j.runQuery(
-        `MATCH (s:Solution { id: $id })
+        `UNWIND $ids AS sid
+         MATCH (s:Solution { id: sid })
          OPTIONAL MATCH (s)-[:RELATED_TO]->(rel:Solution)
          RETURN s, collect({ id: rel.id, title: rel.title }) AS related`,
-        { id: hit.id },
+        { ids },
       )
-      if (res.records.length === 0) continue
-      const rec = res.records[0]
-      const s = rec.get('s').properties
-      const related = (rec.get('related') as any[]).filter((r) => r.id)
-      results.push({
-        id: s.id,
-        title: s.title,
-        summary: s.summary,
-        tags: hit.tags,
-        ticket_ref: s.ticket_ref,
-        project: s.project,
-        score: hit._rankingScore ?? 0,
-        related,
-        created_at: s.created_at,
-      })
+
+      // Build a map for O(1) lookup by id, preserving Meilisearch rank order
+      const byId = new Map<string, any>()
+      for (const rec of res.records) {
+        const s = rec.get('s').properties
+        byId.set(s.id, {
+          id: s.id,
+          title: s.title,
+          summary: s.summary,
+          ticket_ref: s.ticket_ref,
+          project: s.project,
+          created_at: s.created_at,
+          related: (rec.get('related') as any[]).filter((r) => r.id),
+        })
+      }
+
+      // Re-order by Meilisearch rank and attach tags + score from search index
+      for (const hit of hits) {
+        const node = byId.get(hit.id)
+        if (!node) continue
+        results.push({
+          ...node,
+          tags: hit.tags ?? [],
+          score: hit._rankingScore ?? 0,
+        })
+      }
     }
 
     const payload = { results, total: totalHits }
@@ -173,9 +187,11 @@ export class KbService {
     const result = await this.neo4j.runQuery(
       `MATCH (s:Solution { id: $id })
        OPTIONAL MATCH (s)-[:TAGGED_WITH]->(t:Tag)
+       OPTIONAL MATCH (s)-[:USES]->(tech:Technology)
        OPTIONAL MATCH (s)-[:RELATED_TO]->(rel:Solution)
        RETURN s,
          collect(DISTINCT t.name) AS tags,
+         collect(DISTINCT tech.name) AS technologies,
          collect(DISTINCT { id: rel.id, title: rel.title }) AS related`,
       { id },
     )
@@ -190,7 +206,7 @@ export class KbService {
       tags: rec.get('tags'),
       ticket_ref: s.ticket_ref,
       project: s.project,
-      technologies: [],
+      technologies: rec.get('technologies'),
       created_at: s.created_at,
       updated_at: s.updated_at,
       related: (rec.get('related') as any[]).filter((r) => r.id),

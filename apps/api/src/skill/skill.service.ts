@@ -63,23 +63,27 @@ export class SkillService {
       },
     )
 
-    for (const tool of compatible) {
+    // Batch AITool linking with UNWIND (single query instead of N)
+    if (compatible.length > 0) {
       await this.neo4j.runQuery(
-        `MERGE (t:AITool { name: $tool })
+        `UNWIND $compatible AS toolName
+         MERGE (t:AITool { name: toolName })
          WITH t
          MATCH (s:Skill { name: $name })
          MERGE (s)-[:COMPATIBLE_WITH]->(t)`,
-        { tool, name: dto.name },
+        { compatible, name: dto.name },
       )
     }
 
-    for (const tag of tags) {
+    // Batch tag linking with UNWIND (single query instead of N)
+    if (tags.length > 0) {
       await this.neo4j.runQuery(
-        `MERGE (t:Tag { name: $tag })
+        `UNWIND $tags AS tagName
+         MERGE (t:Tag { name: tagName })
          WITH t
          MATCH (s:Skill { name: $name })
          MERGE (s)-[:TAGGED_WITH]->(t)`,
-        { tag, name: dto.name },
+        { tags, name: dto.name },
       )
     }
 

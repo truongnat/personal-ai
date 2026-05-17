@@ -32,10 +32,16 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
       'CREATE CONSTRAINT skill_name IF NOT EXISTS FOR (s:Skill) REQUIRE s.name IS UNIQUE',
       'CREATE CONSTRAINT aitool_name IF NOT EXISTS FOR (t:AITool) REQUIRE t.name IS UNIQUE',
     ]
-    for (const c of constraints) {
+    // Index on key_prefix enables O(1) lookup in validateKey (without this, prefix query is still O(n))
+    const indexes = [
+      'CREATE INDEX apikey_prefix IF NOT EXISTS FOR (k:ApiKey) ON (k.key_prefix)',
+      'CREATE INDEX solution_project IF NOT EXISTS FOR (s:Solution) ON (s.project)',
+      'CREATE INDEX solution_created IF NOT EXISTS FOR (s:Solution) ON (s.created_at)',
+    ]
+    for (const c of [...constraints, ...indexes]) {
       await this.runQuery(c)
     }
-    this.logger.log('Neo4j constraints ready')
+    this.logger.log('Neo4j constraints and indexes ready')
   }
 
   async onModuleDestroy() {
