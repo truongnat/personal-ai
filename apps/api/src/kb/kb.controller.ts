@@ -8,12 +8,16 @@ import {
   Param,
   Query,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { KbService } from './kb.service'
 import { ApiKeyGuard } from '../auth/api-key.guard'
 import { PushKbDto } from './dto/push-kb.dto'
 import { UpdateKbDto } from './dto/update-kb.dto'
+import { SearchKbDto } from './dto/search-kb.dto'
+import { plainToInstance } from 'class-transformer'
+import { validate } from 'class-validator'
 
 @Controller('kb')
 @UseGuards(ApiKeyGuard)
@@ -27,8 +31,18 @@ export class KbController {
 
   @Throttle({ short: { limit: 2, ttl: 1000 } })
   @Get('search')
-  search(@Query('q') q: string, @Query('limit') limit?: string) {
-    return this.kbService.search(q, limit ? parseInt(limit) : 5)
+  async search(@Query('q') q: string, @Query('limit') limit?: string) {
+    // Validate query parameter
+    if (!q || typeof q !== 'string' || q.trim().length === 0) {
+      throw new BadRequestException('Query parameter "q" is required and must be a non-empty string')
+    }
+
+    const limitNum = limit ? parseInt(limit) : 5
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100')
+    }
+
+    return this.kbService.search(q, limitNum)
   }
 
   @Get('list')

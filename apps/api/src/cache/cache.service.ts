@@ -38,9 +38,21 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async delByPattern(pattern: string): Promise<void> {
-    const keys = await this.client.keys(pattern)
-    if (keys.length > 0) {
-      await this.client.del(...keys)
-    }
+    const pipeline = this.client.pipeline()
+    let cursor = '0'
+    const SCAN_COUNT = 100 // Iterate in batches to avoid blocking
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', SCAN_COUNT)
+      cursor = nextCursor
+
+      // Queue deletions for this batch
+      for (const key of keys) {
+        pipeline.del(key)
+      }
+    } while (cursor !== '0')
+
+    // Execute all deletions
+    await pipeline.exec()
   }
 }

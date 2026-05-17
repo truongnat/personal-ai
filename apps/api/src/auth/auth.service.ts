@@ -13,6 +13,7 @@ export class AuthService {
   async generateKey(label: string, expiresIn?: string): Promise<{ id: string; key: string; label: string; created_at: string }> {
     const rawKey = 'kb_live_' + randomBytes(16).toString('hex')
     const keyHash = await bcrypt.hash(rawKey, 10)
+    const keyPrefix = rawKey.substring(0, 15) // 'kb_live_' (8) + first 7 hex chars
     const id = uuidv4()
 
     let expiresAt: string | null = null
@@ -25,6 +26,7 @@ export class AuthService {
       `CREATE (k:ApiKey {
         id: $id,
         key_hash: $keyHash,
+        key_prefix: $keyPrefix,
         label: $label,
         active: true,
         expires_at: $expiresAt,
@@ -32,7 +34,7 @@ export class AuthService {
         last_used_at: null,
         use_count: 0
       })`,
-      { id, keyHash, label, expiresAt, createdAt: new Date().toISOString() },
+      { id, keyHash, keyPrefix, label, expiresAt, createdAt: new Date().toISOString() },
     )
 
     this.logger.log(`API key generated: ${label} (${id})`)
@@ -40,13 +42,19 @@ export class AuthService {
   }
 
   async validateKey(rawKey: string): Promise<boolean> {
+    const keyPrefix = rawKey.substring(0, 15) // Extract same prefix from input key
+    const now = new Date().toISOString()
+
+    // Query only keys with matching prefix (O(1) in most cases)
     const result = await this.neo4j.runQuery(
-      `MATCH (k:ApiKey { active: true })
+      `MATCH (k:ApiKey { active: true, key_prefix: $keyPrefix })
        WHERE k.expires_at IS NULL OR k.expires_at > $now
-       RETURN k.id AS id, k.key_hash AS hash`,
-      { now: new Date().toISOString() },
+       RETURN k.id AS id, k.key_hash AS hash
+       LIMIT 2`,
+      { keyPrefix, now },
     )
 
+    // Compare against 1-2 keys instead of all keys
     for (const record of result.records) {
       const hash = record.get('hash')
       const id = record.get('id')
@@ -55,7 +63,7 @@ export class AuthService {
         await this.neo4j.runQuery(
           `MATCH (k:ApiKey { id: $id })
            SET k.last_used_at = $now, k.use_count = k.use_count + 1`,
-          { id, now: new Date().toISOString() },
+          { id, now },
         )
         return true
       }

@@ -37,13 +37,15 @@ export class KbService {
       { id, title: dto.title, content: dto.content, summary, ticketRef: dto.ticket_ref ?? null, project: dto.project ?? null, now },
     )
 
-    for (const tag of tags) {
+    // Batch tag creation with UNWIND (single query instead of N)
+    if (tags.length > 0) {
       await this.neo4j.runQuery(
-        `MERGE (t:Tag { name: $tag })
+        `UNWIND $tags AS tagName
+         MERGE (t:Tag { name: tagName })
          WITH t
          MATCH (s:Solution { id: $id })
          MERGE (s)-[:TAGGED_WITH]->(t)`,
-        { tag, id },
+        { tags, id },
       )
     }
 
@@ -57,13 +59,15 @@ export class KbService {
       )
     }
 
-    for (const tech of technologies) {
+    // Batch technology creation with UNWIND (single query instead of N)
+    if (technologies.length > 0) {
       await this.neo4j.runQuery(
-        `MERGE (t:Technology { name: $tech })
+        `UNWIND $technologies AS techName
+         MERGE (t:Technology { name: techName })
          WITH t
          MATCH (s:Solution { id: $id })
          MERGE (s)-[:USES]->(t)`,
-        { tech, id },
+        { technologies, id },
       )
     }
 

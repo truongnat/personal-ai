@@ -211,9 +211,12 @@ export class SkillService {
       if (dto.description) sections.push(`\n${dto.description}\n`)
     }
 
-    for (const skillName of dto.skills) {
-      const installed = await this.install(skillName)
-      const skillMd: string = installed.files['SKILL.md'] ?? ''
+    // Install all skills in parallel instead of serial
+    const installed = await Promise.all(dto.skills.map((skillName) => this.install(skillName)))
+
+    for (let i = 0; i < dto.skills.length; i++) {
+      const skillName = dto.skills[i]
+      const skillMd: string = installed[i].files['SKILL.md'] ?? ''
       const withoutH1 = skillMd.replace(/^#\s.+\n/, '')
       sections.push(`\n---\n\n<!-- from: ${skillName} -->\n${withoutH1}`)
     }

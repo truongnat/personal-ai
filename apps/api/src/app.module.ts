@@ -8,6 +8,7 @@ import { SearchModule } from './search/search.module'
 import { AuthModule } from './auth/auth.module'
 import { KbModule } from './kb/kb.module'
 import { SkillModule } from './skill/skill.module'
+import { AppController } from './app.controller'
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { SkillModule } from './skill/skill.module'
     KbModule,
     SkillModule,
   ],
+  controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

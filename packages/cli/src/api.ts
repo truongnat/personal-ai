@@ -10,6 +10,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  timeoutMs = 30000, // 30 second timeout
 ): Promise<T> {
   const { hub_url, api_key } = getConfig()
 
@@ -19,21 +20,35 @@ async function request<T>(
     )
   }
 
-  const res = await fetch(`${hub_url}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': api_key,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  // Create abort controller with timeout
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new ApiError(res.status, text)
+  try {
+    const res = await fetch(`${hub_url}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText)
+      throw new ApiError(res.status, text)
+    }
+
+    return res.json() as T
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms. API may be unresponsive.`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  return res.json() as T
 }
 
 export const api = {
