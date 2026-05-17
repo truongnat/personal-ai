@@ -1,0 +1,62 @@
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import neo4j, { Driver, Session, QueryResult } from 'neo4j-driver'
+
+@Injectable()
+export class Neo4jService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(Neo4jService.name)
+  private driver: Driver
+
+  constructor(private config: ConfigService) {}
+
+  async onModuleInit() {
+    this.driver = neo4j.driver(
+      this.config.get<string>('NEO4J_URI'),
+      neo4j.auth.basic(
+        this.config.get<string>('NEO4J_USER'),
+        this.config.get<string>('NEO4J_PASSWORD'),
+      ),
+    )
+    await this.driver.verifyConnectivity()
+    this.logger.log('Neo4j connected')
+    await this.createConstraints()
+  }
+
+  private async createConstraints() {
+    const constraints = [
+      'CREATE CONSTRAINT apikey_id IF NOT EXISTS FOR (k:ApiKey) REQUIRE k.id IS UNIQUE',
+      'CREATE CONSTRAINT solution_id IF NOT EXISTS FOR (s:Solution) REQUIRE s.id IS UNIQUE',
+      'CREATE CONSTRAINT tag_name IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE',
+      'CREATE CONSTRAINT project_name IF NOT EXISTS FOR (p:Project) REQUIRE p.name IS UNIQUE',
+      'CREATE CONSTRAINT tech_name IF NOT EXISTS FOR (t:Technology) REQUIRE t.name IS UNIQUE',
+      'CREATE CONSTRAINT skill_name IF NOT EXISTS FOR (s:Skill) REQUIRE s.name IS UNIQUE',
+      'CREATE CONSTRAINT aitool_name IF NOT EXISTS FOR (t:AITool) REQUIRE t.name IS UNIQUE',
+    ]
+    for (const c of constraints) {
+      await this.runQuery(c)
+    }
+    this.logger.log('Neo4j constraints ready')
+  }
+
+  async onModuleDestroy() {
+    await this.driver.close()
+  }
+
+  async runQuery(cypher: string, params: Record<string, any> = {}): Promise<QueryResult> {
+    const session: Session = this.driver.session()
+    try {
+      return await session.run(cypher, params)
+    } finally {
+      await session.close()
+    }
+  }
+
+  toPlain(record: any): Record<string, any> {
+    const obj: Record<string, any> = {}
+    for (const key of record.keys) {
+      const val = record.get(key)
+      obj[key] = val?.properties ?? val
+    }
+    return obj
+  }
+}

@@ -1,0 +1,35 @@
+# Secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+vps.txt
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Docker volumes (local dev)
+neo4j_data/
+meili_data/
+redis_data/
+
+# CLI build output
+packages/cli/dist/
