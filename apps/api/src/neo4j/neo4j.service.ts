@@ -26,6 +26,7 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     const constraints = [
       'CREATE CONSTRAINT apikey_id IF NOT EXISTS FOR (k:ApiKey) REQUIRE k.id IS UNIQUE',
       'CREATE CONSTRAINT solution_id IF NOT EXISTS FOR (s:Solution) REQUIRE s.id IS UNIQUE',
+      'CREATE CONSTRAINT solution_revision_id IF NOT EXISTS FOR (r:SolutionRevision) REQUIRE r.id IS UNIQUE',
       'CREATE CONSTRAINT tag_name IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE',
       'CREATE CONSTRAINT project_name IF NOT EXISTS FOR (p:Project) REQUIRE p.name IS UNIQUE',
       'CREATE CONSTRAINT tech_name IF NOT EXISTS FOR (t:Technology) REQUIRE t.name IS UNIQUE',
@@ -37,6 +38,8 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
       'CREATE INDEX apikey_prefix IF NOT EXISTS FOR (k:ApiKey) ON (k.key_prefix)',
       'CREATE INDEX solution_project IF NOT EXISTS FOR (s:Solution) ON (s.project)',
       'CREATE INDEX solution_created IF NOT EXISTS FOR (s:Solution) ON (s.created_at)',
+      'CREATE INDEX solution_revision_solution IF NOT EXISTS FOR (r:SolutionRevision) ON (r.solution_id)',
+      'CREATE INDEX solution_revision_version IF NOT EXISTS FOR (r:SolutionRevision) ON (r.version)',
     ]
     for (const c of [...constraints, ...indexes]) {
       await this.runQuery(c)

@@ -8,6 +8,7 @@ import { SearchService } from '../search/search.service'
 import { PushKbDto } from './dto/push-kb.dto'
 import { UpdateKbDto } from './dto/update-kb.dto'
 import { SuggestedTagDto } from './dto/suggest-tags.dto'
+import { SolutionRevisionDto, SolutionHistoryResponseDto, RevisionDiffDto } from './dto/solution-revision.dto'
 
 @Injectable()
 export class KbService {
@@ -33,10 +34,14 @@ export class KbService {
         ticket_ref: $ticketRef,
         project: $project,
         created_at: $now,
-        updated_at: $now
+        updated_at: $now,
+        version_count: 1
       })`,
       { id, title: dto.title, content: dto.content, summary, ticketRef: dto.ticket_ref ?? null, project: dto.project ?? null, now },
     )
+
+    // Create initial revision
+    await this.createRevision(id, 1, dto.title, summary, dto.content, tags)
 
     // Batch tag creation with UNWIND (single query instead of N)
     if (tags.length > 0) {
@@ -370,5 +375,61 @@ export class KbService {
     return Array.from(scored.values())
       .filter((t) => t.confidence > 0.2)
       .sort((a, b) => b.confidence - a.confidence)
+  }
+
+  private async createRevision(solutionId: string, version: number, title: string, summary: string, content: string, tags: string[]): Promise<void> {
+    const revisionId = uuidv4()
+    const now = new Date().toISOString()
+    const contentHash = createHash('sha256').update(content).digest('hex')
+
+    await this.neo4j.runQuery(
+      `CREATE (r:SolutionRevision {
+        id: $revisionId,
+        solution_id: $solutionId,
+        version: $version,
+        title: $title,
+        summary: $summary,
+        content_hash: $contentHash,
+        tags_snapshot: $tagsSnapshot,
+        created_at: $now
+      })`,
+      { revisionId, solutionId, version, title, summary, contentHash, tagsSnapshot: JSON.stringify(tags), now },
+    )
+  }
+
+  async getHistory(solutionId: string): Promise<SolutionHistoryResponseDto> {
+    const result = await this.neo4j.runQuery(
+      `MATCH (s:Solution { id: $solutionId })
+       OPTIONAL MATCH (s)<-[:FOR]-(r:SolutionRevision)
+       RETURN s, collect(r) AS revisions ORDER BY r.version DESC`,
+      { solutionId },
+    )
+
+    if (result.records.length === 0) throw new NotFoundException(`Solution ${solutionId} not found`)
+
+    const rec = result.records[0]
+    const s = rec.get('s').properties
+    const revisions = rec.get('revisions')
+
+    return {
+      id: s.id,
+      title: s.title,
+      totalRevisions: revisions.length,
+      revisions: revisions
+        .sort((a: any, b: any) => b.properties.version - a.properties.version)
+        .map((r: any) => {
+          const props = r.properties
+          return {
+            id: props.id,
+            solutionId: props.solution_id,
+            version: props.version.toNumber?.() ?? props.version,
+            title: props.title,
+            summary: props.summary,
+            contentHash: props.content_hash,
+            tagsSnapshot: JSON.parse(props.tags_snapshot ?? '[]'),
+            createdAt: props.created_at,
+          }
+        }),
+    }
   }
 }

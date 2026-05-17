@@ -169,4 +169,16 @@ export class KbController {
   delete(@Param('id') id: string) {
     return this.kbService.delete(id)
   }
+
+  @Get(':id/history')
+  @ApiOperation({
+    summary: 'Get solution revision history',
+    description: 'Retrieve all revisions of a solution with timestamps and tags snapshots',
+  })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Solution history with revisions' })
+  @ApiResponse({ status: 404, description: 'Solution not found' })
+  getHistory(@Param('id') id: string) {
+    return this.kbService.getHistory(id)
+  }
 }
