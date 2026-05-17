@@ -1,9 +1,8 @@
 import { Controller, Get, HttpCode } from '@nestjs/common'
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ApiOperation, ApiResponse } from '@nestjs/swagger'
 import { SkipThrottle } from '@nestjs/throttler'
 
 @Controller()
-@ApiTags('health')
 export class AppController {
   @Get('/health')
   @HttpCode(200)
